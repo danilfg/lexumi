@@ -129,9 +129,19 @@ python -m unittest discover -s tests -v
 Build a standalone Apple Silicon app and DMG:
 
 ```bash
-pip install pyinstaller==6.16.0
+pip install pyinstaller==6.16.0 dmgbuild==1.6.7
 python build_macos.py --dmg --output dist
 ```
+
+For a **Ventura-compatible release built on macOS 14 or newer**, do not bundle newer Homebrew DjVuLibre binaries. Install the portable conda-forge ARM dependency set and point the builder at it:
+
+```bash
+micromamba create -y -n lexumi-djvu -c conda-forge djvulibre=3.5.28
+export LEXUMI_DJVU_BIN_DIR="$(dirname "$(micromamba run -n lexumi-djvu which ddjvu)")"
+python build_macos.py --dmg --output dist
+```
+
+The build verifies every bundled arm64 Mach-O deployment target and fails rather than distributing a falsely labeled macOS 13 app.
 
 The local build script currently creates:
 
