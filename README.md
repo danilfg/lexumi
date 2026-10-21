@@ -25,7 +25,9 @@ Lexumi-<version>-macOS-arm64.dmg
 4. Drag **Lexumi.app** to **Applications**.
 5. Open Lexumi and drop a book into the window.
 
-Lexumi targets **macOS 14 Sonoma or newer**. Release builds bundle the required DjVu command-line tools, so end users do not need Python, Homebrew or `Install.command`.
+Lexumi targets **macOS 13 Ventura or newer on Apple Silicon**, including MacBook M1 with macOS 13.0.1. Release builds bundle the required DjVu command-line tools, so end users do not need Python, Homebrew or `Install.command`.
+
+**Ventura compatibility:** The macOS release build now verifies the minimum OS version of each bundled arm64 Mach-O binary, not just the `Info.plist` setting. A successful build is a prerequisite; before announcing full macOS 13.0.1 support, smoke-test the published DMG on a real Ventura M1 Mac (launch, PDF, DjVu, EPUB, scrolling, printing and export).
 
 ### If macOS says “Lexumi Not Opened”
 
