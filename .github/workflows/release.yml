@@ -127,6 +127,18 @@ jobs:
           cd dist
           shasum -a 256 "${{ steps.version.outputs.asset }}" > "${{ steps.version.outputs.checksum }}"
 
+      # Let a Ventura/M1 user smoke-test the exact candidate before merge.
+      - name: Upload Ventura test DMG
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lexumi-macOS13-arm64-test
+          path: |
+            dist/${{ steps.version.outputs.asset }}
+            dist/${{ steps.version.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publish GitHub Release
         if: github.event_name != 'pull_request'
         env:
