@@ -8,6 +8,12 @@ on:
       - main
     paths:
       - '.github/RELEASE_VERSION'
+  pull_request:
+    paths:
+      - 'build_macos.py'
+      - '.github/workflows/release.yml'
+      - 'requirements.txt'
+      - 'tests/**'
   workflow_dispatch:
     inputs:
       version:
@@ -28,7 +34,9 @@ env:
 
 jobs:
   release:
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
     steps:
       - uses: actions/checkout@v4
 
@@ -55,10 +63,35 @@ jobs:
           echo "checksum=${ASSET}.sha256" >> "$GITHUB_OUTPUT"
           echo "Building $VERSION -> $ASSET"
 
+      # Use the portable actions/setup-python build rather than Homebrew's
+      # host-OS-targeted Python, which may not run on macOS 13.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: 'arm64'
+
+      # The Homebrew macOS 15 DjVuLibre bottle requires macOS 15 at runtime.
+      # Conda-forge's osx-arm64 package is compiled for older macOS targets.
+      - uses: mamba-org/setup-micromamba@v3
+        id: djvu
+        with:
+          environment-name: lexumi-djvu
+          create-args: >-
+            -c conda-forge
+            djvulibre=3.5.28
+          init-shell: none
+
+      - name: Locate portable DjVu command-line tools
+        run: |
+          DJVU_BIN="${{ steps.djvu.outputs.environment-path }}/bin"
+          for TOOL in ddjvu djvused djvutxt djvudump; do
+            test -x "$DJVU_BIN/$TOOL"
+          done
+          echo "LEXUMI_DJVU_BIN_DIR=$DJVU_BIN" >> "$GITHUB_ENV"
+
       - name: Install build dependencies
         run: |
-          brew install python@3.12 djvulibre
-          /opt/homebrew/bin/python3.12 -m venv .venv
+          python -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/pip install -r requirements.txt pyinstaller==6.16.0 dmgbuild==1.6.7
 
@@ -85,12 +118,29 @@ jobs:
           .venv/bin/python build_macos.py --dmg --output dist
           mv dist/Lexumi-macOS-arm64.dmg "dist/${{ steps.version.outputs.asset }}"
 
+      - name: Verify macOS minimum version in app bundle
+        run: |
+          /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' dist/Lexumi.app/Contents/Info.plist | grep -Fx '13.0'
+
       - name: Create checksum
         run: |
           cd dist
           shasum -a 256 "${{ steps.version.outputs.asset }}" > "${{ steps.version.outputs.checksum }}"
 
+      # Let a Ventura/M1 user smoke-test the exact candidate before merge.
+      - name: Upload Ventura test DMG
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lexumi-macOS13-arm64-test
+          path: |
+            dist/${{ steps.version.outputs.asset }}
+            dist/${{ steps.version.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publish GitHub Release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import platform
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import tempfile
 from lexumi import __version__ as VERSION
 
 BUNDLE_ID = 'tech.itroadmaps.lexumi'
+MINIMUM_MACOS_VERSION = '13.0'
 DJVU_TOOLS = ('ddjvu', 'djvused', 'djvutxt', 'djvudump')
 
 
@@ -62,6 +64,9 @@ def make_icon(folder):
 
 def locate_djvu_tool(name):
     candidates = [Path('/opt/homebrew/bin') / name, Path('/usr/local/bin') / name]
+    portable_dir = os.environ.get('LEXUMI_DJVU_BIN_DIR', '').strip()
+    if portable_dir:
+        candidates.insert(0, Path(portable_dir) / name)
     which = shutil.which(name)
     if which:
         candidates.insert(0, Path(which))
@@ -104,7 +109,7 @@ def configure_info_plist(app):
         CFBundleShortVersionString=VERSION,
         CFBundleVersion='2',
         NSHighResolutionCapable=True,
-        LSMinimumSystemVersion='14.0',
+        LSMinimumSystemVersion=MINIMUM_MACOS_VERSION,
         CFBundleDocumentTypes=[dict(
             CFBundleTypeName='Ebook or document',
             CFBundleTypeRole='Viewer',
@@ -119,6 +124,10 @@ def configure_info_plist(app):
 def verify_standalone(app):
     """Fail the release build if any Mach-O still points into a Homebrew prefix."""
     bad = []
+    disallowed_prefixes = ['/opt/homebrew/', '/usr/local/']
+    portable_dir = os.environ.get('LEXUMI_DJVU_BIN_DIR', '').strip()
+    if portable_dir:
+        disallowed_prefixes.append(str(Path(portable_dir).resolve().parent) + '/')
     for path in app.rglob('*'):
         if not path.is_file() or path.is_symlink():
             continue
@@ -128,11 +137,71 @@ def verify_standalone(app):
         deps = subprocess.run(['/usr/bin/otool', '-L', str(path)], capture_output=True, text=True, check=False)
         for line in deps.stdout.splitlines()[1:]:
             dep = line.strip().split(' ', 1)[0]
-            if dep.startswith('/opt/homebrew/') or dep.startswith('/usr/local/'):
+            if any(dep.startswith(prefix) for prefix in disallowed_prefixes):
                 bad.append((path.relative_to(app), dep))
     if bad:
         lines = '\n'.join(f'  {binary}: {dep}' for binary, dep in bad[:40])
         raise SystemExit('The app is not standalone; unresolved Homebrew dependencies remain:\n' + lines)
+
+
+def _macos_minimum_versions_from_otool(load_commands):
+    """Parse deployment targets from arm64 Mach-O load commands."""
+    versions = []
+    current_command = None
+    for raw_line in load_commands.splitlines():
+        line = raw_line.strip()
+        if line.startswith('Load command '):
+            current_command = None
+        elif line.startswith('cmd '):
+            current_command = line[4:]
+        elif current_command in ('LC_BUILD_VERSION', 'LC_VERSION_MIN_MACOSX'):
+            field = 'minos' if current_command == 'LC_BUILD_VERSION' else 'version'
+            match = re.fullmatch(rf'{field} (\d+(?:\.\d+){{1,2}})', line)
+            if match:
+                versions.append(tuple(int(part) for part in match.group(1).split('.')))
+    return versions
+
+
+def verify_macos_compatibility(app):
+    """Reject bundles with arm64 binaries requiring a newer macOS than advertised.
+
+    Info.plist alone is not enough: PyInstaller, Qt, Python and DjVuLibre
+    ship compiled libraries that may have their own newer deployment targets.
+    """
+    target = tuple(int(part) for part in MINIMUM_MACOS_VERSION.split('.'))
+    incompatible = []
+    checked = 0
+    for path in app.rglob('*'):
+        if not path.is_file() or path.is_symlink():
+            continue
+        probe = subprocess.run(['/usr/bin/file', str(path)], capture_output=True, text=True)
+        if 'Mach-O' not in probe.stdout:
+            continue
+        checked += 1
+        commands = subprocess.run(
+            ['/usr/bin/otool', '-arch', 'arm64', '-l', str(path)],
+            capture_output=True, text=True,
+        )
+        relative_path = path.relative_to(app)
+        if commands.returncode != 0:
+            incompatible.append(f'{relative_path}: cannot inspect arm64 slice: {commands.stderr.strip()}')
+            continue
+        versions = _macos_minimum_versions_from_otool(commands.stdout)
+        if not versions:
+            incompatible.append(f'{relative_path}: missing macOS deployment target')
+        elif max(versions) > target:
+            version = '.'.join(map(str, max(versions)))
+            incompatible.append(f'{relative_path}: requires macOS {version}')
+    if checked == 0:
+        raise SystemExit('No Mach-O binaries found in application bundle')
+    if incompatible:
+        details = '\n'.join(f'  {line}' for line in incompatible[:40])
+        raise SystemExit(
+            f'Cannot advertise macOS {MINIMUM_MACOS_VERSION}: incompatible bundled binaries:\n'
+            + details
+            + ('\n  ...' if len(incompatible) > 40 else '')
+        )
+    print(f'Verified {checked} Mach-O binaries for macOS {MINIMUM_MACOS_VERSION} on arm64')
 
 
 def sign_app(app):
@@ -209,6 +278,9 @@ def main():
     if sys.platform != 'darwin' or platform.machine() != 'arm64':
         raise SystemExit('Build Lexumi on an Apple Silicon macOS runner without Rosetta.')
 
+    # Propagate the target to build tools that compile or relink native code.
+    os.environ['MACOSX_DEPLOYMENT_TARGET'] = MINIMUM_MACOS_VERSION
+
     root = Path(__file__).resolve().parent
     output_dir = (root / args.output).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -220,6 +292,7 @@ def main():
         app = temp / 'dist/Lexumi.app'
         configure_info_plist(app)
         verify_standalone(app)
+        verify_macos_compatibility(app)
         sign_app(app)
 
         target = output_dir / 'Lexumi.app'
