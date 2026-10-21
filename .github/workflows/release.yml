@@ -70,9 +70,27 @@ jobs:
           python-version: '3.12'
           architecture: 'arm64'
 
+      # The Homebrew macOS 15 DjVuLibre bottle requires macOS 15 at runtime.
+      # Conda-forge's osx-arm64 package is compiled for older macOS targets.
+      - uses: mamba-org/setup-micromamba@v3
+        id: djvu
+        with:
+          environment-name: lexumi-djvu
+          create-args: >-
+            -c conda-forge
+            djvulibre=3.5.28
+          init-shell: none
+
+      - name: Locate portable DjVu command-line tools
+        run: |
+          DJVU_BIN="${{ steps.djvu.outputs.environment-path }}/bin"
+          for TOOL in ddjvu djvused djvutxt djvudump; do
+            test -x "$DJVU_BIN/$TOOL"
+          done
+          echo "LEXUMI_DJVU_BIN_DIR=$DJVU_BIN" >> "$GITHUB_ENV"
+
       - name: Install build dependencies
         run: |
-          brew install djvulibre
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/pip install -r requirements.txt pyinstaller==6.16.0 dmgbuild==1.6.7
