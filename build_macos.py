@@ -149,7 +149,7 @@ def _macos_minimum_versions_from_otool(load_commands):
             current_command = line[4:]
         elif current_command in ('LC_BUILD_VERSION', 'LC_VERSION_MIN_MACOSX'):
             field = 'minos' if current_command == 'LC_BUILD_VERSION' else 'version'
-            match = re.fullmatch(rf'{field} (\d+(?:\.\d+){1,2})', line)
+            match = re.fullmatch(rf'{field} (\d+(?:\.\d+){{1,2}})', line)
             if match:
                 versions.append(tuple(int(part) for part in match.group(1).split('.')))
     return versions
