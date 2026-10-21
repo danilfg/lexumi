@@ -64,6 +64,9 @@ def make_icon(folder):
 
 def locate_djvu_tool(name):
     candidates = [Path('/opt/homebrew/bin') / name, Path('/usr/local/bin') / name]
+    portable_dir = os.environ.get('LEXUMI_DJVU_BIN_DIR', '').strip()
+    if portable_dir:
+        candidates.insert(0, Path(portable_dir) / name)
     which = shutil.which(name)
     if which:
         candidates.insert(0, Path(which))
@@ -121,6 +124,10 @@ def configure_info_plist(app):
 def verify_standalone(app):
     """Fail the release build if any Mach-O still points into a Homebrew prefix."""
     bad = []
+    disallowed_prefixes = ['/opt/homebrew/', '/usr/local/']
+    portable_dir = os.environ.get('LEXUMI_DJVU_BIN_DIR', '').strip()
+    if portable_dir:
+        disallowed_prefixes.append(str(Path(portable_dir).resolve().parent) + '/')
     for path in app.rglob('*'):
         if not path.is_file() or path.is_symlink():
             continue
@@ -130,7 +137,7 @@ def verify_standalone(app):
         deps = subprocess.run(['/usr/bin/otool', '-L', str(path)], capture_output=True, text=True, check=False)
         for line in deps.stdout.splitlines()[1:]:
             dep = line.strip().split(' ', 1)[0]
-            if dep.startswith('/opt/homebrew/') or dep.startswith('/usr/local/'):
+            if any(dep.startswith(prefix) for prefix in disallowed_prefixes):
                 bad.append((path.relative_to(app), dep))
     if bad:
         lines = '\n'.join(f'  {binary}: {dep}' for binary, dep in bad[:40])
