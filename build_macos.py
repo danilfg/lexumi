@@ -149,7 +149,7 @@ def _macos_minimum_versions_from_otool(load_commands):
             current_command = line[4:]
         elif current_command in ('LC_BUILD_VERSION', 'LC_VERSION_MIN_MACOSX'):
             field = 'minos' if current_command == 'LC_BUILD_VERSION' else 'version'
-            match = re.fullmatch(rf'{field} (\\d+(?:\\.\\d+){1,2})', line)
+            match = re.fullmatch(rf'{field} (\d+(?:\.\d+){1,2})', line)
             if match:
                 versions.append(tuple(int(part) for part in match.group(1).split('.')))
     return versions
@@ -188,11 +188,11 @@ def verify_macos_compatibility(app):
     if checked == 0:
         raise SystemExit('No Mach-O binaries found in application bundle')
     if incompatible:
-        details = '\\n'.join(f'  {line}' for line in incompatible[:40])
+        details = '\n'.join(f'  {line}' for line in incompatible[:40])
         raise SystemExit(
-            f'Cannot advertise macOS {MINIMUM_MACOS_VERSION}: incompatible bundled binaries:\\n'
+            f'Cannot advertise macOS {MINIMUM_MACOS_VERSION}: incompatible bundled binaries:\n'
             + details
-            + ('\\n  ...' if len(incompatible) > 40 else '')
+            + ('\n  ...' if len(incompatible) > 40 else '')
         )
     print(f'Verified {checked} Mach-O binaries for macOS {MINIMUM_MACOS_VERSION} on arm64')
 
