@@ -1,2 +1,2 @@
 PySide6==6.8.3
-PyMuPDF==1.26.6
+PyMuPDF==2.0
